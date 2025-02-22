@@ -2,6 +2,7 @@ import streamlit as st
 import sqlite3
 from itertools import permutations
 import random
+import pandas as pd
 
 # Database setup
 conn = sqlite3.connect('pes_league.db', check_same_thread=False)
