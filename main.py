@@ -167,7 +167,7 @@ if page == "Dashboard":
                                 border-radius: 10px; 
                                 border: 1px solid #dee2e6;
                                 margin: 0.5rem 0;">
-                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <div style="display: flex; justify-content: space-between;color:white; align-items: center;">
                             <div style="flex: 1; text-align: right; font-weight: bold;">{home}</div>
                             <div style="flex: 0.5; text-align: center; 
                                       font-size: 1.2rem; color: {result_color}; 
@@ -264,11 +264,9 @@ if page == "Dashboard":
 # Page 2: Player Registration
 elif page == "Player Registration":
     st.title("Player Registration")
-
     # Load existing players from DB
     c.execute("SELECT name FROM players")
     players = [row[0] for row in c.fetchall()]
-    
     new_player = st.text_input("Enter player name")
     if st.button("Add Player") and new_player:
         if new_player not in players and len(players) < 10:
@@ -433,16 +431,53 @@ elif page == "League Classification":
                         )
                     
                     if st.button("Submit Score", key=f"submit_{home}_{away}"):
-                        c.execute(
-                            """UPDATE matches 
-                            SET home_goals = ?, away_goals = ? 
-                            WHERE home_player = ? AND away_player = ? AND round = ?""",
-                            (home_goals, away_goals, home, away, selected_round)
-                        )
-                        conn.commit()
-                        st.success(f"✅ Result recorded: {home} {home_goals} - {away_goals} {away}")
-                        st.rerun()
+                        if st.session_state.get("password_verified", False):
+                            c.execute(
+                                """UPDATE matches 
+                                SET home_goals = ?, away_goals = ? 
+                                WHERE home_player = ? AND away_player = ? AND round = ?""",
+                                (home_goals, away_goals, home, away, selected_round)
+                            )
+                            conn.commit()
+                            st.success(f"✅ Result recorded: {home} {home_goals} - {away_goals} {away}")
+                            st.rerun()
+                        else:
+                            st.session_state.pending_submission = {
+                                "home": home,
+                                "away": away,
+                                "round": selected_round,
+                                "home_goals": home_goals,
+                                "away_goals": away_goals
+                            }
+                            st.session_state.show_password = True
+                            st.rerun()
                     st.markdown("</div>", unsafe_allow_html=True)
+                
+                # Password verification section
+                if st.session_state.get("show_password", False):
+                    password = st.text_input("Enter Admin Password", type="password", key="admin_pwd")
+                    if password:
+                        if password == "admin":
+                            st.session_state.password_verified = True
+                            st.session_state.show_password = False
+                            submission = st.session_state.pending_submission
+                            c.execute(
+                                """UPDATE matches 
+                                SET home_goals = ?, away_goals = ? 
+                                WHERE home_player = ? AND away_player = ? AND round = ?""",
+                                (submission["home_goals"], submission["away_goals"], 
+                                 submission["home"], submission["away"], submission["round"])
+                            )
+                            conn.commit()
+                            st.success(f"✅ Result recorded: {submission['home']} {submission['home_goals']} - {submission['away_goals']} {submission['away']}")
+                            del st.session_state.pending_submission
+                            st.rerun()
+                        else:
+                            st.error("Incorrect password. Please try again.")
+                            if "pending_submission" in st.session_state:
+                                del st.session_state.pending_submission
+                            st.session_state.show_password = False
+                            st.rerun()
             else:
                 st.info(f"All matches in Round {selected_round} have been completed!")
         else:
@@ -482,7 +517,7 @@ elif page == "League Classification":
 
         # Sort and display enhanced leaderboard
         leaderboard = sorted(standings.items(), key=lambda x: (-x[1]["Points"], -x[1]["GD"]))
-        
+
         # Create styled DataFrame
         leaderboard_data = []
         for idx, (p, s) in enumerate(leaderboard):
@@ -510,8 +545,24 @@ elif page == "League Classification":
         # Create and style DataFrame
         df = pd.DataFrame(leaderboard_data)
         df = df[["Position", "Player", "Pts", "GD", "MP", "W", "D", "L", "GF", "GA"]]
-        
-        # Apply styling
+
+        # Define functions for conditional formatting
+        def highlight_top_bottom(row):
+            """Highlight top and bottom positions with green and red colors."""
+            position = int(row["Position"].replace("🥇", "").replace("🥈", "").replace("🥉", ""))
+            styles = ["background-color: transparent"] * len(row)
+            
+            # Highlight top 4 positions (e.g., Champions League spots)
+            if position <= 4:
+                styles = ["background-color: #e8f5e9"] * len(row)  # Light green
+                
+            # Highlight bottom 3 positions (e.g., relegation zone)
+            elif position >= len(leaderboard_data) - 2:
+                styles = ["background-color: #ffebee"] * len(row)  # Light red
+                
+            return styles
+
+        # Apply Premier League-inspired styling
         styled_df = df.style \
             .hide(axis='index') \
             .format({
@@ -524,50 +575,84 @@ elif page == "League Classification":
                 "GF": "{:d}",
                 "GA": "{:d}"
             }) \
-            .background_gradient(subset=["Pts"], cmap="YlGn") \
-            .background_gradient(subset=["GD"], cmap="RdYlGn") \
-            .set_properties(**{'font-weight': '500'}, subset=["Player"]) \
-            .set_properties(**{'text-align': 'center'}, subset=["Pts", "GD", "MP", "W", "D", "L", "GF", "GA"]) \
+            .apply(highlight_top_bottom, axis=1) \
+            .applymap(lambda x: 'font-weight: bold;', subset=["Player"]) \
+            .apply(lambda x: ['background-color: #f8f9fa' if i%2==0 else 'background-color: white' for i in range(len(x))]) \
+            .set_properties(**{
+                'text-align': 'center',
+                'font-size': '14px',
+                'border': '1px solid #dee2e6'
+            }, subset=["Pts", "GD", "MP", "W", "D", "L", "GF", "GA"]) \
+            .set_properties(**{
+                'text-align': 'left',
+                'padding-left': '12px'
+            }, subset=["Player"]) \
             .set_table_styles([{
                 'selector': 'th',
-                'props': [('background-color', '#4b8bff'), 
-                         ('color', 'white'),
-                         ('font-weight', 'bold')]
+                'props': [
+                    ('background-color', '#37003c'),  # Premier League purple
+                    ('color', 'white'),
+                    ('font-weight', 'bold'),
+                    ('font-size', '15px'),
+                    ('text-align', 'center'),
+                    ('border', '0px solid #dee2e6')
+                ]
+            }, {
+                'selector': 'td',
+                'props': [
+                    ('border', '1px solid #dee2e6'),
+                    ('padding', '8px')
+                ]
+            }, {
+                'selector': 'tr:hover',
+                'props': [
+                    ('background-color', '#f1f3f5')
+                ]
             }])
-
-        # Display styled DataFrame
         st.dataframe(
             styled_df,
             use_container_width=True,
-            height=(len(leaderboard_data) + 1) * 35 + 3,
+            height=(len(leaderboard_data) + 1) * 38 + 3,
             column_config={
-                "Position": "Position",
-                "Player": "Player",
-                "Pts": "Points",
-                "GD": "Goal Diff",
-                "MP": "Matches",
-                "W": "Wins",
-                "D": "Draws",
-                "L": "Losses",
-                "GF": "Goals For",
-                "GA": "Goals Against"
+                "Position": st.column_config.TextColumn("Pos", width="small"),
+                "Player": st.column_config.TextColumn("Player", width="large"),
+                "Pts": st.column_config.NumberColumn("Pts", width="small"),
+                "GD": st.column_config.NumberColumn("GD", width="small"),
+                "MP": st.column_config.NumberColumn("MP", width="small"),
+                "W": st.column_config.NumberColumn("W", width="small"),
+                "D": st.column_config.NumberColumn("D", width="small"),
+                "L": st.column_config.NumberColumn("L", width="small"),
+                "GF": st.column_config.NumberColumn("GF", width="small"),
+                "GA": st.column_config.NumberColumn("GA", width="small")
             },
             hide_index=True
         )
-
-        # Add custom styling
         st.markdown("""
             <style>
                 [data-testid="stDataFrame"] {
-                    border: 1px solid #dee2e6;
-                    border-radius: 8px;
-                    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                    border: 0px solid #37003c;
+                    border-radius: 12px;
+                    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
                 }
                 [data-testid="stDataFrame"] table {
                     width: 100%;
+                    border-collapse: collapse;
                 }
                 [data-testid="stDataFrame"] th {
                     border-bottom: 2px solid #dee2e6 !important;
+                }
+                [data-testid="stDataFrame"] tr:first-child td {
+                    background-color: #e8d4ff !important;
+                    font-weight: bold !important;
+                }
+                [data-testid="stDataFrame"] tr:nth-child(2) td {
+                    background-color: #f3e9ff !important;
+                }
+                [data-testid="stDataFrame"] tr:nth-child(3) td {
+                    background-color: #f8f2ff !important;
+                }
+                [data-testid="stDataFrame"] tr td {
+                    transition: background-color 0.2s ease;
                 }
             </style>
         """, unsafe_allow_html=True)
