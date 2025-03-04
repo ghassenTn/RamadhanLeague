@@ -77,36 +77,78 @@ if page == "Dashboard":
             odds = 1.2 + (position - 1) * (2.3 / (total_players - 1))  # Linear scaling
             return f"{odds:.1f} $"
         # --- Current Standings Section ---
-        st.header("🏅 Current Standings", divider="blue")
+        st.header("🏆 Premier League Standings", divider="rainbow")
         if leaderboard:
             # Create top 5 cards
-            cols = st.columns(5)
-            podium_emojis = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
+            cols = st.columns(4)
+            podium_emojis = ["👑", "🥈", "🥉", "4️⃣"]
             
-            for idx in range(5):
+            for idx in range(4):
                 if idx < len(leaderboard):
                     player, stats = leaderboard[idx]
                     with cols[idx]:
+                        # Different card colors for top 3
+                        card_color = "#37003C"  # Premier League purple
+                        if idx == 0:
+                            card_color = "linear-gradient(45deg, #37003C 0%, #E90052 100%)"
+                        elif idx == 1:
+                            card_color = "#1D428A"  # Secondary blue
+                        elif idx == 2:
+                            card_color = "#00A551"  # Premier League green
+
                         st.markdown(f"""
-                            <div style="background-color: black; 
-                                        padding: 1rem; 
-                                        border-radius: 10px; 
-                                        border: 1px solid white;
+                            <div style="background: {card_color};
+                                        padding: 1.5rem;
+                                        border-radius: 15px;
+                                        border: 1px solid #00FF87;
                                         text-align: center;
-                                        margin-bottom: 1rem;">
-                                <div style="font-size: 1.5rem;">{podium_emojis[idx]}</div>
-                                <h3 style="margin: 0.5rem 0; color: white;">{player}</h3>
-                                <div style="color: #4b8bff; font-size: 1.2rem; font-weight: bold;">
-                                    {stats['Points']} pts
+                                        margin-bottom: 1rem;
+                                        box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+                                        transition: transform 0.2s;
+                                        min-height: 220px;
+                                        display: flex;
+                                        flex-direction: column;
+                                        justify-content: space-between;">
+                                <div>
+                                    <div style="font-size: 2rem; margin-bottom: 0.5rem;">{podium_emojis[idx]}</div>
+                                    <h3 style="margin: 0.5rem 0; 
+                                            color: #00FF87; 
+                                            font-family: 'Arial Black', sans-serif;
+                                            text-shadow: 0 2px 4px rgba(0,0,0,0.5);">
+                                        {player}
+                                    </h3>
                                 </div>
-                                <div style="color: white;">
-                                    GD: {stats['GD']:+} • W: {stats['Wins']}
+                                <div>
+                                    <div style="background: linear-gradient(45deg, #FFD700, #FFFFFF);
+                                                -webkit-background-clip: text;
+                                                color: transparent;
+                                                font-size: 1.8rem;
+                                                font-weight: bold;
+                                                margin: 0.5rem 0;">
+                                        {stats['Points']} pts
+                                    </div>
+                                    <div style="color: #FFFFFF;
+                                            font-size: 0.9rem;
+                                            border-top: 1px solid #00FF87;
+                                            padding-top: 0.5rem;
+                                            margin: 0 1rem;">
+                                        <div>🏃 GD: {stats['GD']:+}</div>
+                                        <div>✅ W: {stats['Wins']}</div>
+                                    </div>
                                 </div>
                             </div>
                         """, unsafe_allow_html=True)
-            st.caption("Top 5 players based on current standings")
+            
+            st.caption("""
+                <div style="color: #00FF87; font-size: 0.9rem; margin-top: -1rem;">
+                    🔺 Ramadhan League ranking system | GD: Goal Difference | MP: Matches Played
+                </div>
+            """, unsafe_allow_html=True)
         else:
-            st.info("⏳ No matches played yet. Standings will appear here after first matches.")
+            st.info("""
+                ⚽ No matches played yet. 
+                Standings will appear here after the first fixtures.
+            """)
 
         # --- Upcoming Matches Section ---
         st.header("⏩ Upcoming Matches", divider="orange")
@@ -298,7 +340,6 @@ elif page == "Player Registration":
     else:
         st.warning(f"Need exactly 10 players (currently {len(players)}).")
 
-# Page 3: Match Schedule
 elif page == "Match Schedule":
     st.title("Match Schedule")
     if not st.session_state.confirmed:
@@ -311,34 +352,59 @@ elif page == "Match Schedule":
         # Generate schedule if not already in DB
         c.execute("SELECT COUNT(*) FROM matches")
         if c.fetchone()[0] == 0:
-            matches = list(permutations(players, 2))  # 90 matches
-            random.shuffle(matches)
-
-            # Organize into 18 rounds (5 matches per round)
-            match_idx = 0
-            for round_num in range(1, 19):
+            # Use a round-robin algorithm to create a double round robin schedule
+            n = len(players)
+            # If odd number of players, add a dummy "Bye" team (these matches will be skipped)
+            if n % 2 == 1:
+                players.append("Bye")
+                n += 1
+            
+            fixed = players[0]
+            rotating = players[1:]
+            rounds = []
+            # First half rounds: generate n-1 rounds
+            for r in range(n - 1):
+                teams_order = [fixed] + rotating
                 round_matches = []
-                used_players = set()
-                temp_matches = matches[match_idx:]
-                attempts = 0
-                while len(round_matches) < 5 and temp_matches and attempts < 100:
-                    home, away = temp_matches.pop(0)
-                    if home not in used_players and away not in used_players:
-                        round_matches.append((home, away, f"Round {round_num}", "20:00", None, None))
-                        used_players.add(home)
-                        used_players.add(away)
-                        match_idx += 1
-                    attempts += 1
-                if len(round_matches) == 5:
-                    c.executemany(
-                        "INSERT INTO matches (home_player, away_player, round, time, home_goals, away_goals) VALUES (?, ?, ?, ?, ?, ?)",
-                        round_matches
-                    )
+                for i in range(n // 2):
+                    home = teams_order[i]
+                    away = teams_order[-(i+1)]
+                    # Exclude matches involving "Bye"
+                    if home != "Bye" and away != "Bye":
+                        round_matches.append((home, away, f"Round {r+1}", "20:00", None, None))
+                rounds.append(round_matches)
+                # Rotate the teams (keep the first team fixed)
+                rotating = [rotating[-1]] + rotating[:-1]
+            
+            # Second half: mirror the matches (swap home and away) and assign subsequent round numbers
+            rounds2 = []
+            for r, round_matches in enumerate(rounds):
+                mirrored = []
+                for match in round_matches:
+                    home, away, _, time, _, _ = match
+                    mirrored.append((away, home, f"Round {r + n}", time, None, None))
+                rounds2.append(mirrored)
+            
+            full_rounds = rounds + rounds2
+            # Insert all rounds into the database
+            for round_matches in full_rounds:
+                c.executemany(
+                    "INSERT INTO matches (home_player, away_player, round, time, home_goals, away_goals) VALUES (?, ?, ?, ?, ?, ?)",
+                    round_matches
+                )
             conn.commit()
 
         # Load and display schedule
         c.execute("SELECT home_player, away_player, round, time, home_goals, away_goals FROM matches")
-        schedule = [{"Match": f"{row[0]} vs {row[1]}", "Round": row[2], "Time": row[3], "Result": (row[4], row[5]) if row[4] is not None else None} for row in c.fetchall()]
+        schedule = [
+            {
+                "Match": f"{row[0]} vs {row[1]}", 
+                "Round": row[2], 
+                "Time": row[3], 
+                "Result": (row[4], row[5]) if row[4] is not None else None
+            } 
+            for row in c.fetchall()
+        ]
         
         filtered_schedule = schedule
         filter_player = st.selectbox("Filter by Player", ["All"] + players)
@@ -355,10 +421,14 @@ elif page == "Match Schedule":
         new_time = st.text_input("New Time (e.g., 20:00)", "20:00")
         if st.button("Update Time"):
             home, away = match_to_edit.split(" vs ")
-            c.execute("UPDATE matches SET time = ? WHERE home_player = ? AND away_player = ?", (new_time, home, away))
+            c.execute(
+                "UPDATE matches SET time = ? WHERE home_player = ? AND away_player = ?",
+                (new_time, home, away)
+            )
             conn.commit()
             st.success(f"Updated time for {match_to_edit}")
             st.rerun()
+
 
 elif page == "League Classification":
     st.title("🏆 League Classification")
